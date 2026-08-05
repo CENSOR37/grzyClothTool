@@ -390,6 +390,142 @@ namespace grzyClothTool.Views
             }
         }
 
+        private async void ImportDctProject_Click(object sender, RoutedEventArgs e)
+        {
+            var progressStarted = false;
+
+            try
+            {
+                var mainProjectsFolder = PersistentSettingsHelper.Instance.MainProjectsFolder;
+                if (string.IsNullOrEmpty(mainProjectsFolder))
+                {
+                    Show("Please configure the main projects folder in settings first.",
+                         "Configuration Required",
+                         CustomMessageBoxButtons.OKOnly,
+                         CustomMessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!Directory.Exists(mainProjectsFolder))
+                {
+                    Show($"Main projects folder does not exist: {mainProjectsFolder}\n\nPlease update it in settings.",
+                         "Folder Not Found",
+                         CustomMessageBoxButtons.OKOnly,
+                         CustomMessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!SaveHelper.CheckUnsavedChangesMessage())
+                {
+                    return;
+                }
+
+                OpenFileDialog openFileDialog = new()
+                {
+                    Title = "Import Durty Cloth Tool Project",
+                    Filter = "Durty Cloth Tool projects (*.dctproj)|*.dctproj",
+                    Multiselect = false
+                };
+
+                if (openFileDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                var import = await DctProjectImporter.LoadAsync(openFileDialog.FileName);
+                await DctProjectImporter.ValidateReferencedFilesAsync(import);
+                var dialog = ProjectSetupDialog.ShowForDctImport(
+                    Window.GetWindow(this),
+                    import.SuggestedProjectName,
+                    import.DrawableCount);
+                if (!dialog.Confirmed)
+                {
+                    return;
+                }
+
+                var projectName = dialog.ProjectName.Trim();
+                var isExternal = !dialog.IsSelfContained;
+                var projectFolder = Path.Combine(mainProjectsFolder, projectName);
+
+                if (Directory.Exists(projectFolder))
+                {
+                    ClearProjectFolder(projectFolder);
+                }
+                Directory.CreateDirectory(projectFolder);
+
+                ProgressHelper.Start($"Started importing Durty Cloth Tool project: {openFileDialog.SafeFileName}");
+                progressStarted = true;
+
+                var prepared = await DctProjectImporter.PrepareAsync(import, projectFolder, isExternal);
+
+                MainWindow.AddonManager.Addons.Clear();
+                MainWindow.AddonManager.Groups.Clear();
+                MainWindow.AddonManager.Tags.Clear();
+                MainWindow.AddonManager.MoveMenuItems.Clear();
+                MainWindow.AddonManager.ProjectName = projectName;
+                MainWindow.AddonManager.IsExternalProject = isExternal;
+                DuplicateDetector.Clear();
+
+                var converted = DctProjectImporter.Convert(prepared, GlobalConstants.MAX_DRAWABLES_IN_ADDON);
+                foreach (var addon in converted.Addons)
+                {
+                    MainWindow.AddonManager.Addons.Add(addon);
+                }
+                foreach (var tag in converted.Tags)
+                {
+                    MainWindow.AddonManager.Tags.Add(tag);
+                }
+                MainWindow.AddonManager.SelectedAddon = MainWindow.AddonManager.Addons.FirstOrDefault();
+
+                ProgressHelper.Stop("Durty Cloth Tool project converted in {0}", true);
+                progressStarted = false;
+
+                SaveHelper.SetUnsavedChanges(true);
+                await SaveHelper.SaveAsync();
+
+                var saveFileName = SaveHelper.GetSaveFileName(isExternal);
+                var savePath = Path.Combine(projectFolder, saveFileName);
+                if (!File.Exists(savePath))
+                {
+                    throw new IOException($"The converted project could not be saved to {savePath}.");
+                }
+
+                PersistentSettingsHelper.Instance.AddRecentProject(
+                    savePath,
+                    projectName,
+                    import.DrawableCount,
+                    converted.Addons.Count,
+                    isExternal);
+                LoadRecentProjects();
+                MainWindow.NavigationHelper.Navigate("Project");
+
+                var skippedCount = import.UnsupportedItemCount + converted.UnsupportedAlternateModelCount;
+                var message = $"Imported {import.DrawableCount} drawable(s) into project \"{projectName}\".";
+                if (skippedCount > 0)
+                {
+                    message += $"\n\n{skippedCount} unsupported decoration, facial overlay, or extra alternate-model item(s) were skipped.";
+                }
+
+                Show(message,
+                     "Import Complete",
+                     CustomMessageBoxButtons.OKOnly,
+                     skippedCount > 0 ? CustomMessageBoxIcon.Warning : CustomMessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                if (progressStarted)
+                {
+                    ProgressHelper.Stop("Durty Cloth Tool project import failed", false);
+                }
+
+                LogHelper.Log($"Failed to import Durty Cloth Tool project: {ex.Message}", Views.LogType.Error);
+                Show($"Failed to import Durty Cloth Tool project: {ex.Message}",
+                     "Import Failed",
+                     CustomMessageBoxButtons.OKOnly,
+                     CustomMessageBoxIcon.Error);
+            }
+        }
+
         private async void ImportProject_Click(object sender, RoutedEventArgs e)
         {
             var success = await MainWindow.Instance.ImportProjectAsync(true);

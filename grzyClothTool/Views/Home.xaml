@@ -60,6 +60,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <c:CustomButton Label="Create new project" AutomationProperties.AutomationId="Create new project" Height="100" FontSize="20" Padding="5" CornerRadius="5" MyBtnClickEvent="CreateNew_Click" />
+                        <c:CustomButton Label="Import Durty Cloth Tool project" AutomationProperties.AutomationId="Import Durty Cloth Tool project" Height="60" Padding="5" CornerRadius="5" MyBtnClickEvent="ImportDctProject_Click" />
                         <c:CustomButton Label="Import project" Height="60" Padding="5" CornerRadius="5" MyBtnClickEvent="ImportProject_Click" />
                         <c:CustomButton Label="Open addon" Height="60" Padding="5" CornerRadius="5" MyBtnClickEvent="OpenAddon_Click" />
                         <c:CustomButton Label="Open save" Height="60" Padding="5" CornerRadius="5" MyBtnClickEvent="OpenSave_Click" />
