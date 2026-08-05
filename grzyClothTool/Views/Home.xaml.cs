@@ -433,7 +433,10 @@ namespace grzyClothTool.Views
                 }
 
                 var import = await DctProjectImporter.LoadAsync(openFileDialog.FileName);
-                await DctProjectImporter.ValidateReferencedFilesAsync(import);
+                if (!await ResolveMissingDctFilesAsync(import))
+                {
+                    return;
+                }
                 var dialog = ProjectSetupDialog.ShowForDctImport(
                     Window.GetWindow(this),
                     import.SuggestedProjectName,
@@ -523,6 +526,67 @@ namespace grzyClothTool.Views
                      "Import Failed",
                      CustomMessageBoxButtons.OKOnly,
                      CustomMessageBoxIcon.Error);
+            }
+        }
+
+        private async Task<bool> ResolveMissingDctFilesAsync(DctProjectImport import)
+        {
+            while (true)
+            {
+                var missingFiles = await DctProjectImporter.FindMissingReferencedFilesAsync(import);
+                if (missingFiles.Count == 0)
+                {
+                    return true;
+                }
+
+                var filePreview = string.Join(
+                    "\n",
+                    missingFiles.Take(5).Select(file => $"• {file.StoredPath}"));
+                if (missingFiles.Count > 5)
+                {
+                    filePreview += $"\n• ...and {missingFiles.Count - 5} more";
+                }
+
+                var result = Show(
+                    $"{missingFiles.Count} file(s) referenced by the Durty Cloth Tool project could not be found:\n\n" +
+                    $"{filePreview}\n\n" +
+                    "Would you like to select a folder containing these files? The selected folder and its subfolders will be searched.",
+                    "Missing Project Files",
+                    CustomMessageBoxButtons.YesNo,
+                    CustomMessageBoxIcon.Warning);
+                if (result != CustomMessageBoxResult.Yes)
+                {
+                    return false;
+                }
+
+                OpenFolderDialog folderDialog = new()
+                {
+                    Title = "Select Folder Containing Missing DCT Project Files",
+                    Multiselect = false
+                };
+
+                var sourceFolder = Path.GetDirectoryName(import.SourcePath);
+                if (!string.IsNullOrWhiteSpace(sourceFolder) && Directory.Exists(sourceFolder))
+                {
+                    folderDialog.FolderName = sourceFolder;
+                }
+
+                if (folderDialog.ShowDialog() != true)
+                {
+                    return false;
+                }
+
+                var resolvedCount = await DctProjectImporter.ResolveMissingFilesFromFolderAsync(
+                    import,
+                    folderDialog.FolderName);
+                if (resolvedCount == 0)
+                {
+                    Show(
+                        "None of the missing project files were found in the selected folder. Please select the folder that contains the files, or a parent folder containing them.",
+                        "Files Not Found",
+                        CustomMessageBoxButtons.OKOnly,
+                        CustomMessageBoxIcon.Warning);
+                }
             }
         }
 

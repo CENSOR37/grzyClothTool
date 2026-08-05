@@ -202,6 +202,54 @@ public class DctProjectImporterTests
         Assert.Contains("escapes", exception.Message);
     }
 
+    [Fact]
+    public async Task ResolveMissingFilesFromFolderAsync_UsesFolderAndUniqueRecursiveMatches()
+    {
+        using var temp = new TestTempDirectory();
+        var sourceFolder = temp.FilePath("source");
+        Directory.CreateDirectory(sourceFolder);
+        var searchFolder = temp.FilePath("recovered-assets");
+        var nestedSearchFolder = Path.Combine(searchFolder, "textures", "stream");
+        Directory.CreateDirectory(nestedSearchFolder);
+        WriteAsset(searchFolder, "model.ydd");
+        WriteAsset(nestedSearchFolder, "texture.ytd");
+
+        var json = JsonSerializer.Serialize(new
+        {
+            ProjectName = "recovered",
+            ClothData = new[]
+            {
+                new
+                {
+                    MainPath = "model.ydd",
+                    Position = 0,
+                    TargetGender = 0,
+                    ClothType = 0,
+                    DrawableType = 11,
+                    Textures = new[]
+                    {
+                        new { Position = 0, FilePath = "texture.ytd", IsDummy = false }
+                    }
+                }
+            }
+        });
+        var import = DctProjectImporter.ParseJson(json, Path.Combine(sourceFolder, "sample.dctproj"));
+
+        var missingBeforeSearch = await DctProjectImporter.FindMissingReferencedFilesAsync(import);
+        var resolvedCount = await DctProjectImporter.ResolveMissingFilesFromFolderAsync(import, searchFolder);
+        var missingAfterSearch = await DctProjectImporter.FindMissingReferencedFilesAsync(import);
+        var prepared = await DctProjectImporter.PrepareAsync(
+            import,
+            temp.FilePath("output"),
+            isExternalProject: true);
+
+        Assert.Equal(2, missingBeforeSearch.Count);
+        Assert.Equal(2, resolvedCount);
+        Assert.Empty(missingAfterSearch);
+        Assert.Equal(Path.Combine(searchFolder, "model.ydd"), prepared.PersistedPaths["model.ydd"]);
+        Assert.Equal(Path.Combine(nestedSearchFolder, "texture.ytd"), prepared.PersistedPaths["texture.ytd"]);
+    }
+
     private static object CreateBasicCloth(
         string mainPath,
         int position,

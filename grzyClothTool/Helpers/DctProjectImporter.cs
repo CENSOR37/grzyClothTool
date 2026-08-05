@@ -17,6 +17,7 @@ internal sealed class DctProjectImport
 {
     internal required DctProjectData Project { get; init; }
     internal required string SourcePath { get; init; }
+    internal Dictionary<string, string> ResolvedPathOverrides { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public string SuggestedProjectName =>
         string.IsNullOrWhiteSpace(Project.ProjectName)
@@ -26,6 +27,8 @@ internal sealed class DctProjectImport
     public int DrawableCount => Project.ClothData.Count;
     public int UnsupportedItemCount => Project.DecorationData.Count + Project.FacialoverlayData.Count;
 }
+
+internal sealed record DctMissingFile(string StoredPath, string ExpectedPath);
 
 internal sealed class DctPreparedProject
 {
@@ -127,7 +130,9 @@ internal static class DctProjectImporter
         var storedPaths = EnumerateSupportedFilePaths(import.Project)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var sourcePaths = ResolveSourcePaths(import.SourcePath, storedPaths);
+        var resolution = ResolveSourcePaths(import, storedPaths);
+        ThrowIfFilesAreMissing(resolution.MissingFiles);
+        var sourcePaths = resolution.ResolvedPaths;
         var persistedPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (isExternalProject)
@@ -161,14 +166,101 @@ internal static class DctProjectImporter
         };
     }
 
-    public static Task ValidateReferencedFilesAsync(DctProjectImport import)
+    public static Task<IReadOnlyList<DctMissingFile>> FindMissingReferencedFilesAsync(DctProjectImport import)
     {
         ArgumentNullException.ThrowIfNull(import);
-        return Task.Run(() =>
+        return Task.Run<IReadOnlyList<DctMissingFile>>(() =>
         {
             var storedPaths = EnumerateSupportedFilePaths(import.Project)
                 .Distinct(StringComparer.OrdinalIgnoreCase);
-            ResolveSourcePaths(import.SourcePath, storedPaths);
+            return ResolveSourcePaths(import, storedPaths).MissingFiles;
+        });
+    }
+
+    public static Task<int> ResolveMissingFilesFromFolderAsync(DctProjectImport import, string searchFolder)
+    {
+        ArgumentNullException.ThrowIfNull(import);
+        if (string.IsNullOrWhiteSpace(searchFolder))
+        {
+            throw new ArgumentException("A search folder is required.", nameof(searchFolder));
+        }
+
+        var fullSearchFolder = Path.GetFullPath(searchFolder);
+        if (!Directory.Exists(fullSearchFolder))
+        {
+            throw new DirectoryNotFoundException($"The selected search folder does not exist: {fullSearchFolder}");
+        }
+
+        return Task.Run(() =>
+        {
+            var storedPaths = EnumerateSupportedFilePaths(import.Project)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var missingFiles = ResolveSourcePaths(import, storedPaths).MissingFiles;
+            if (missingFiles.Count == 0)
+            {
+                return 0;
+            }
+
+            var unresolved = new List<DctMissingFile>();
+            var resolvedCount = 0;
+            foreach (var missingFile in missingFiles)
+            {
+                var directMatch = FindDirectMatch(fullSearchFolder, missingFile.StoredPath);
+                if (directMatch is null)
+                {
+                    unresolved.Add(missingFile);
+                    continue;
+                }
+
+                import.ResolvedPathOverrides[missingFile.StoredPath] = directMatch;
+                resolvedCount++;
+            }
+
+            if (unresolved.Count == 0)
+            {
+                return resolvedCount;
+            }
+
+            var requestedFileNames = unresolved
+                .Select(file => Path.GetFileName(file.StoredPath))
+                .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var recursiveMatches = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var enumerationOptions = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                ReturnSpecialDirectories = false
+            };
+
+            foreach (var candidate in Directory.EnumerateFiles(fullSearchFolder, "*", enumerationOptions))
+            {
+                var fileName = Path.GetFileName(candidate);
+                if (!requestedFileNames.Contains(fileName))
+                {
+                    continue;
+                }
+
+                if (!recursiveMatches.TryGetValue(fileName, out var matches))
+                {
+                    matches = [];
+                    recursiveMatches[fileName] = matches;
+                }
+                matches.Add(candidate);
+            }
+
+            foreach (var missingFile in unresolved)
+            {
+                var fileName = Path.GetFileName(missingFile.StoredPath);
+                if (recursiveMatches.TryGetValue(fileName, out var matches) && matches.Count == 1)
+                {
+                    import.ResolvedPathOverrides[missingFile.StoredPath] = Path.GetFullPath(matches[0]);
+                    resolvedCount++;
+                }
+            }
+
+            return resolvedCount;
         });
     }
 
@@ -369,28 +461,29 @@ internal static class DctProjectImporter
         }
     }
 
-    private static Dictionary<string, string> ResolveSourcePaths(
-        string projectPath,
+    private static PathResolution ResolveSourcePaths(
+        DctProjectImport import,
         IEnumerable<string> storedPaths)
     {
-        var projectDirectory = Path.GetDirectoryName(projectPath)
+        var projectDirectory = Path.GetDirectoryName(import.SourcePath)
             ?? throw new InvalidDataException("The Durty Cloth Tool project has no parent directory.");
         var dataDirectory = Path.Combine(projectDirectory, "data");
         var relativeBasePath = Directory.Exists(dataDirectory) ? dataDirectory : projectDirectory;
         var fullBasePath = Path.GetFullPath(relativeBasePath);
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var missingFiles = new List<DctMissingFile>();
 
         foreach (var storedPath in storedPaths)
         {
-            string sourcePath;
+            string expectedPath;
             if (Path.IsPathRooted(storedPath))
             {
-                sourcePath = Path.GetFullPath(storedPath);
+                expectedPath = Path.GetFullPath(storedPath);
             }
             else
             {
-                sourcePath = Path.GetFullPath(Path.Combine(fullBasePath, storedPath));
-                var relativePath = Path.GetRelativePath(fullBasePath, sourcePath);
+                expectedPath = Path.GetFullPath(Path.Combine(fullBasePath, storedPath));
+                var relativePath = Path.GetRelativePath(fullBasePath, expectedPath);
                 if (relativePath == ".." ||
                     relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
                     Path.IsPathRooted(relativePath))
@@ -399,17 +492,62 @@ internal static class DctProjectImporter
                 }
             }
 
-            if (!File.Exists(sourcePath))
+            if (File.Exists(expectedPath))
             {
-                throw new FileNotFoundException(
-                    $"A file referenced by the Durty Cloth Tool project could not be found: {storedPath}",
-                    sourcePath);
+                result[storedPath] = expectedPath;
+                continue;
             }
 
-            result[storedPath] = sourcePath;
+            if (import.ResolvedPathOverrides.TryGetValue(storedPath, out var overridePath) &&
+                File.Exists(overridePath))
+            {
+                result[storedPath] = Path.GetFullPath(overridePath);
+                continue;
+            }
+
+            import.ResolvedPathOverrides.Remove(storedPath);
+            missingFiles.Add(new DctMissingFile(storedPath, expectedPath));
         }
 
-        return result;
+        return new PathResolution(result, missingFiles);
+    }
+
+    private static string? FindDirectMatch(string searchFolder, string storedPath)
+    {
+        if (!Path.IsPathRooted(storedPath))
+        {
+            var relativeCandidate = Path.GetFullPath(Path.Combine(searchFolder, storedPath));
+            var relativePath = Path.GetRelativePath(searchFolder, relativeCandidate);
+            if (relativePath != ".." &&
+                !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
+                !Path.IsPathRooted(relativePath) &&
+                File.Exists(relativeCandidate))
+            {
+                return relativeCandidate;
+            }
+        }
+
+        var fileName = Path.GetFileName(storedPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        var fileNameCandidate = Path.Combine(searchFolder, fileName);
+        return File.Exists(fileNameCandidate) ? Path.GetFullPath(fileNameCandidate) : null;
+    }
+
+    private static void ThrowIfFilesAreMissing(IReadOnlyList<DctMissingFile> missingFiles)
+    {
+        if (missingFiles.Count == 0)
+        {
+            return;
+        }
+
+        var missingFile = missingFiles[0];
+        throw new FileNotFoundException(
+            $"A file referenced by the Durty Cloth Tool project could not be found: {missingFile.StoredPath}",
+            missingFile.ExpectedPath);
     }
 
     private static List<CopyItem> BuildCopyItems(
@@ -535,6 +673,9 @@ internal static class DctProjectImporter
     private sealed record IndexedTexture(DctTextureData Texture, int SourceIndex);
     private sealed record ItemKey(Enums.SexType Sex, bool IsProp, int TypeNumeric);
     private sealed record CopyItem(string SourcePath, string DestinationPath);
+    private sealed record PathResolution(
+        IReadOnlyDictionary<string, string> ResolvedPaths,
+        IReadOnlyList<DctMissingFile> MissingFiles);
 }
 
 internal sealed class DctProjectData
