@@ -99,6 +99,44 @@ public class GDrawableDetails : INotifyPropertyChanged
 
     public bool ShouldCheckHighHeels { get; set; }
 
+    public void RestorePersistedEmbeddedState(GDrawableDetails? previous)
+    {
+        if (previous?.EmbeddedTextures == null || EmbeddedTextures == null)
+        {
+            return;
+        }
+
+        foreach (var (type, persisted) in previous.EmbeddedTextures)
+        {
+            if (persisted == null || !EmbeddedTextures.TryGetValue(type, out var rebuilt) || rebuilt == null)
+            {
+                continue;
+            }
+
+            rebuilt.IsOptimizedDuringBuild = persisted.IsOptimizedDuringBuild;
+            rebuilt.OptimizeDetails = persisted.OptimizeDetails;
+
+            if (!string.IsNullOrEmpty(persisted.ReplacementFilePath))
+            {
+                // The persisted Details describe the replacement image (name, size, format),
+                // so restore them wholesale together with the path.
+                rebuilt.ReplacementFilePath = persisted.ReplacementFilePath;
+                if (!string.IsNullOrEmpty(persisted.Details?.Name))
+                {
+                    rebuilt.Details = persisted.Details;
+                }
+            }
+            else if (rebuilt.HasOriginalTexture
+                     && !string.IsNullOrEmpty(persisted.Details?.Name)
+                     && persisted.Details.Name != rebuilt.Details.Name
+                     && persisted.OriginalName == rebuilt.OriginalName)
+            {
+                // A rename (Details.Name differing from the name inside the .ydd) must survive too.
+                rebuilt.Details.Name = persisted.Details.Name;
+            }
+        }
+    }
+
     public void Validate(
         ObservableCollection<GTexture>? textures = null,
         bool enableHighHeels = false,

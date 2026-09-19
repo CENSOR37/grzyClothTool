@@ -1358,10 +1358,10 @@ namespace grzyClothTool.Controls
             }
         }
 
-        private void ReplaceEmbeddedTexture_Click(object sender, RoutedEventArgs e)
+        private async void ReplaceEmbeddedTexture_Click(object sender, RoutedEventArgs e)
         {
             MenuItem menuItem = sender as MenuItem;
-            
+
             GTextureEmbedded embeddedTexture = null;
             GDrawableDetails.EmbeddedTextureType textureType = GDrawableDetails.EmbeddedTextureType.Normal;
 
@@ -1398,8 +1398,12 @@ namespace grzyClothTool.Controls
                 try
                 {
                     var newTextureData = LoadTextureAsEmbedded(file.FileName, textureType.ToString());
-                    
-                    embeddedTexture.SetReplacementTexture(newTextureData);
+
+                    // Copy the chosen image into project assets and persist its relative path, so the
+                    // replacement survives save/load and is applied during build (not just this session).
+                    var relativePath = await FileHelper.CopyToProjectAssetsAsync(file.FileName, Guid.NewGuid().ToString());
+
+                    embeddedTexture.SetReplacementTexture(newTextureData, relativePath);
 
                     SaveHelper.SetUnsavedChanges(true);
                     LogHelper.Log($"Embedded {textureType} texture replaced (optimization cleared)", LogType.Info);

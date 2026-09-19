@@ -157,7 +157,7 @@ namespace grzyClothTool.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("256")]
+        [global::System.Configuration.DefaultSettingValueAttribute("255")]
         public int MaxDrawablesPerAddon {
             get {
                 return ((int)(this["MaxDrawablesPerAddon"]));

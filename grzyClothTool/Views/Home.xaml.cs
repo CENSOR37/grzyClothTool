@@ -355,6 +355,9 @@ namespace grzyClothTool.Views
                 MainWindow.AddonManager.IsExternalProject = isExternal;
                 MainWindow.AddonManager.CreateAddon();
 
+                SaveHelper.SetUnsavedChanges(true);
+                await SaveHelper.SaveAsync();
+
                 var saveFileName = SaveHelper.GetSaveFileName(isExternal);
                 var newProjectAutoSavePath = Path.Combine(projectFolder, saveFileName);
                 PersistentSettingsHelper.Instance.AddRecentProject(

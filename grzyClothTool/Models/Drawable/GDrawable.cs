@@ -546,6 +546,9 @@ public class GDrawable : INotifyPropertyChanged
                 var result = await LoadDrawableDetailsWithConcurrencyControl();
                 if (result != null)
                 {
+                        // Keep replacement/rename/optimization state from the save file - the
+                        // freshly scanned details only know what is inside the .ydd itself.
+                        result.RestorePersistedEmbeddedState(_details);
                         Details = result;
                         OnPropertyChanged(nameof(Details));
                 }

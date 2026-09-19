@@ -1312,11 +1312,16 @@ public class BuildResourceHelper
             {
                 var embeddedDto = kvp.Value;
 
+                // Rebuild the replacement texture from its persisted file if needed (after a
+                // save/load only the path survives). Use this local instead of HasReplacement:
+                // HasReplacement is true as soon as a path is set, but the data may fail to load.
+                bool hasReplacement = embeddedDto.EnsureReplacementLoaded() && embeddedDto.ReplacementTextureData != null;
+
                 var originalTexturePair = drawable.ShaderGroup.TextureDictionary.Dict
                     .FirstOrDefault(x => x.Value?.Name == embeddedDto.OriginalName);
 
                 // If original texture doesn't exist but we have a replacement, add it as new texture
-                if (originalTexturePair.Value == null && embeddedDto.HasReplacement)
+                if (originalTexturePair.Value == null && hasReplacement)
                 {
                     Texture newTexture;
                     if (embeddedDto.IsOptimizedDuringBuild)
@@ -1384,7 +1389,7 @@ public class BuildResourceHelper
                 }
 
                 Texture textureToUpdate;
-                if (embeddedDto.HasReplacement && embeddedDto.IsOptimizedDuringBuild)
+                if (hasReplacement && embeddedDto.IsOptimizedDuringBuild)
                 {
                     var dds = DDSIO.GetDDSFile(embeddedDto.ReplacementTextureData);
                     var optimizedBytes = await ImgHelper.Optimize(dds, embeddedDto.OptimizeDetails);
@@ -1395,7 +1400,7 @@ public class BuildResourceHelper
                     }
                     textureToUpdate = DDSIO.GetTexture(optimizedBytes);
                 }
-                else if (embeddedDto.HasReplacement)
+                else if (hasReplacement)
                 {
                     textureToUpdate = embeddedDto.ReplacementTextureData;
                 }
@@ -1421,7 +1426,7 @@ public class BuildResourceHelper
                     textureToUpdate.NameHash = JenkHash.GenHash(textureToUpdate.Name);
                 }
 
-                if (embeddedDto.HasReplacement || embeddedDto.IsOptimizedDuringBuild)
+                if (hasReplacement || embeddedDto.IsOptimizedDuringBuild)
                 {
                     drawable.ShaderGroup.TextureDictionary.Dict[originalTexturePair.Key] = textureToUpdate;
 

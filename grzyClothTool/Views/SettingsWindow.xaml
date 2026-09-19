@@ -179,7 +179,7 @@
                                 </GroupBox.Header>
                                 <StackPanel Margin="5">
                                     <TextBlock Padding="5,2,5,5" FontStyle="Italic" FontWeight="Normal" Foreground="{DynamicResource Brush500}" TextWrapping="Wrap">Maximum number of drawables of each type kept in a single addon before a new one is created. Changing this reorganizes existing addons.</TextBlock>
-                                    <c:SettingsLabelTextBox Margin="5" Label="Max per addon (1-256)" LabelFontSize="12" Text="{Binding Path=Instance.MaxDrawablesPerAddon, Source={x:Static helpers:SettingsHelper.Instance}, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" ButtonVisible="False" />
+                                    <c:SettingsLabelTextBox Margin="5" Label="Max drawable number per addon (0-255)" LabelFontSize="12" Text="{Binding Path=Instance.MaxDrawableNumber, Source={x:Static helpers:SettingsHelper.Instance}, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" ButtonVisible="False" />
                                 </StackPanel>
                             </GroupBox>
                         </StackPanel>
